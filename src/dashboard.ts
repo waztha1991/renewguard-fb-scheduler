@@ -84,6 +84,16 @@ export function dashboardHtml(): string {
           <button class="secondary hidden" id="disconnectBtn">Disconnect</button>
         </div>
       </div>
+      <div class="status-row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div>
+          <strong id="liConnStatus">Checking LinkedIn connection…</strong>
+          <div class="hint" id="liConnDetail">Posts to your personal LinkedIn profile.</div>
+        </div>
+        <div>
+          <button class="green" id="liConnectBtn">Connect LinkedIn</button>
+          <button class="secondary hidden" id="liDisconnectBtn">Disconnect</button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -111,7 +121,7 @@ export function dashboardHtml(): string {
       </div>
       <div class="table-scroll">
       <table>
-        <thead><tr><th>Day</th><th>Pillar</th><th>Image</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Day</th><th>Pillar</th><th>Image</th><th>Facebook</th><th>LinkedIn</th><th></th></tr></thead>
         <tbody id="postsBody"></tbody>
       </table>
       </div>
@@ -143,6 +153,10 @@ export function dashboardHtml(): string {
     <input id="postCta" placeholder="Start free trial" />
     <label>Image (upload a file — replaces any existing image)</label>
     <input id="postImage" type="file" accept="image/*" />
+    <label class="check-row" style="display:flex;gap:16px;margin:10px 0;font-weight:600">
+      <span><input id="postFb" type="checkbox" style="width:auto;margin:0 6px 0 0" checked />Publish to Facebook</span>
+      <span><input id="postLi" type="checkbox" style="width:auto;margin:0 6px 0 0" />Publish to LinkedIn</span>
+    </label>
     <div id="postModalErr" class="err"></div>
     <div class="modal-actions">
       <button class="secondary" type="button" id="postModalCancel">Cancel</button>
@@ -197,6 +211,12 @@ document.getElementById('connectBtn').onclick = () => { window.location.href = '
 document.getElementById('disconnectBtn').onclick = async () => {
   if (!confirm('Disconnect this Facebook Page?')) return;
   await apiJson('/api/disconnect', 'POST');
+  await loadStatus();
+};
+document.getElementById('liConnectBtn').onclick = () => { window.location.href = '/auth/linkedin/start'; };
+document.getElementById('liDisconnectBtn').onclick = async () => {
+  if (!confirm('Disconnect LinkedIn?')) return;
+  await apiJson('/api/disconnect/linkedin', 'POST');
   await loadStatus();
 };
 
@@ -255,6 +275,19 @@ async function loadStatus() {
     connectBtn.classList.remove('hidden');
     disconnectBtn.classList.add('hidden');
   }
+
+  const liStatus = document.getElementById('liConnStatus');
+  const liConnectBtn = document.getElementById('liConnectBtn');
+  const liDisconnectBtn = document.getElementById('liDisconnectBtn');
+  if (status.linkedin_connected) {
+    liStatus.textContent = 'Connected as ' + status.linkedin_name;
+    liConnectBtn.classList.add('hidden');
+    liDisconnectBtn.classList.remove('hidden');
+  } else {
+    liStatus.textContent = 'No LinkedIn account connected';
+    liConnectBtn.classList.remove('hidden');
+    liDisconnectBtn.classList.add('hidden');
+  }
 }
 
 async function loadCampaigns(selectId) {
@@ -295,13 +328,14 @@ async function loadPosts() {
       <td><strong>\${p.day_offset}</strong></td>
       <td>\${esc(p.pillar)}</td>
       <td><img class="thumb" src="\${esc(p.resolved_image_url || '')}" /></td>
-      <td><span class="badge \${p.status}">\${p.status}</span></td>
+      <td>\${p.publish_facebook ? '<span class="badge ' + p.status + '">' + p.status + '</span>' : '<span class="hint">off</span>'}</td>
+      <td>\${p.publish_linkedin ? '<span class="badge ' + p.li_status + '">' + p.li_status + '</span>' : '<span class="hint">off</span>'}</td>
       <td class="row-actions">
-        <button class="secondary" data-publish="\${p.id}" \${p.status === 'published' ? 'disabled' : ''}>Publish now</button>
+        <button class="secondary" data-publish="\${p.id}" \${(p.status === 'published' || !p.publish_facebook) && (p.li_status === 'published' || !p.publish_linkedin) ? 'disabled' : ''}>Publish now</button>
         <button class="secondary" data-edit="\${p.id}">Edit</button>
         <button class="danger" data-delete="\${p.id}">Delete</button>
       </td>
-    </tr>\`).join('') || '<tr><td colspan="5">No flyers in this campaign yet.</td></tr>';
+    </tr>\`).join('') || '<tr><td colspan="6">No flyers in this campaign yet.</td></tr>';
 
   body.querySelectorAll('button[data-publish]').forEach(btn => {
     btn.onclick = async () => {
@@ -336,6 +370,8 @@ function openPostModal(post) {
   document.getElementById('postHashtags').value = post ? post.hashtags : '';
   document.getElementById('postCta').value = post ? post.cta : '';
   document.getElementById('postImage').value = '';
+  document.getElementById('postFb').checked = post ? !!post.publish_facebook : true;
+  document.getElementById('postLi').checked = post ? !!post.publish_linkedin : false;
   document.getElementById('postModalErr').textContent = '';
   postModalBg.classList.remove('hidden');
 }
@@ -357,6 +393,8 @@ document.getElementById('postModalSave').onclick = async () => {
   fd.set('caption', document.getElementById('postCaption').value);
   fd.set('hashtags', document.getElementById('postHashtags').value);
   fd.set('cta', document.getElementById('postCta').value);
+  fd.set('publish_facebook', document.getElementById('postFb').checked ? '1' : '0');
+  fd.set('publish_linkedin', document.getElementById('postLi').checked ? '1' : '0');
   const file = document.getElementById('postImage').files[0];
   if (file) fd.set('image', file);
   if (!document.getElementById('postDay').value || !document.getElementById('postCaption').value) {

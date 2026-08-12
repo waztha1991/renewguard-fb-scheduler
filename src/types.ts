@@ -2,6 +2,8 @@ export interface Env {
   DB: D1Database;
   FB_APP_ID: string;
   FB_APP_SECRET: string;
+  LINKEDIN_CLIENT_ID: string;
+  LINKEDIN_CLIENT_SECRET: string;
   ADMIN_USER: string;
   ADMIN_PASSWORD: string;
 }
@@ -30,6 +32,11 @@ export interface PostRow {
   status: "pending" | "published" | "failed";
   fb_post_id: string | null;
   published_at: number | null;
+  publish_facebook: number;
+  publish_linkedin: number;
+  li_status: "pending" | "published" | "failed";
+  li_post_id: string | null;
+  li_published_at: number | null;
 }
 
 export function json(data: unknown, status = 200): Response {

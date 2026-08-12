@@ -1,5 +1,6 @@
 import type { Env, PostRow } from "./types";
 import { publishPhotoToPage } from "./facebook";
+import { publishImagePostToLinkedIn } from "./linkedin";
 
 export async function getConfig(env: Env, key: string): Promise<string | null> {
   const row = await env.DB.prepare("SELECT value FROM config WHERE key = ?").bind(key).first<{ value: string }>();
@@ -14,13 +15,12 @@ export async function setConfig(env: Env, key: string, value: string): Promise<v
     .run();
 }
 
-/** Public URL Facebook (and the dashboard) can fetch this post's image from. */
+/** Public URL any platform's servers (and the dashboard) can fetch this post's image from. */
 export function resolveImageUrl(origin: string, post: PostRow): string {
   if (post.image_source === "uploaded") return `${origin}/image/${post.id}`;
   return post.image_url || "";
 }
 
-/** Finds the currently-active campaign (automation_enabled = 1), if any. */
 export async function activeCampaign(env: Env) {
   return env.DB.prepare("SELECT * FROM campaigns WHERE automation_enabled = 1 LIMIT 1").first<{
     id: number;
@@ -30,7 +30,6 @@ export async function activeCampaign(env: Env) {
   }>();
 }
 
-/** Which day_offset should be live today for the active campaign. Null if none due. */
 export async function currentDueDay(env: Env): Promise<{ campaignId: number; day: number } | null> {
   const campaign = await activeCampaign(env);
   if (!campaign || !campaign.start_date) return null;
@@ -42,27 +41,19 @@ export async function currentDueDay(env: Env): Promise<{ campaignId: number; day
   return { campaignId: campaign.id, day: diffDays };
 }
 
-export async function publishPostById(
-  env: Env,
-  origin: string,
-  postId: number
-): Promise<{ ok: boolean; message: string }> {
-  const post = await env.DB.prepare("SELECT * FROM posts WHERE id = ?").bind(postId).first<PostRow>();
-  if (!post) return { ok: false, message: "Post not found" };
-  if (post.status === "published") return { ok: true, message: "Already published" };
+async function logPublish(env: Env, postId: number, platform: string, ok: boolean, message: string): Promise<void> {
+  await env.DB.prepare("INSERT INTO publish_log (post_id, at, ok, message) VALUES (?, ?, ?, ?)")
+    .bind(postId, Date.now(), ok ? 1 : 0, `[${platform}] ${message}`)
+    .run();
+}
 
+async function publishToFacebook(env: Env, origin: string, post: PostRow): Promise<{ ok: boolean; message: string }> {
   const pageId = await getConfig(env, "fb_page_id");
   const pageToken = await getConfig(env, "fb_page_token");
-  if (!pageId || !pageToken) {
-    await logPublish(env, post.id, false, "No Facebook page connected");
-    return { ok: false, message: "No Facebook page connected" };
-  }
+  if (!pageId || !pageToken) return { ok: false, message: "No Facebook page connected" };
 
   const imageUrl = resolveImageUrl(origin, post);
-  if (!imageUrl) {
-    await logPublish(env, post.id, false, "Post has no image");
-    return { ok: false, message: "Post has no image" };
-  }
+  if (!imageUrl) return { ok: false, message: "Post has no image" };
   const caption = [post.caption, post.hashtags].filter(Boolean).join("\n\n");
 
   try {
@@ -70,17 +61,62 @@ export async function publishPostById(
     await env.DB.prepare("UPDATE posts SET status = 'published', fb_post_id = ?, published_at = ? WHERE id = ?")
       .bind(result.id, Date.now(), post.id)
       .run();
-    await logPublish(env, post.id, true, `Published as Facebook post ${result.id}`);
-    return { ok: true, message: `Published (Facebook post ${result.id})` };
+    return { ok: true, message: `Facebook post ${result.id}` };
   } catch (err: any) {
     await env.DB.prepare("UPDATE posts SET status = 'failed' WHERE id = ?").bind(post.id).run();
-    await logPublish(env, post.id, false, String(err?.message || err));
     return { ok: false, message: String(err?.message || err) };
   }
 }
 
-async function logPublish(env: Env, postId: number, ok: boolean, message: string): Promise<void> {
-  await env.DB.prepare("INSERT INTO publish_log (post_id, at, ok, message) VALUES (?, ?, ?, ?)")
-    .bind(postId, Date.now(), ok ? 1 : 0, message)
-    .run();
+async function publishToLinkedIn(env: Env, origin: string, post: PostRow): Promise<{ ok: boolean; message: string }> {
+  const accessToken = await getConfig(env, "li_access_token");
+  const personUrn = await getConfig(env, "li_person_urn");
+  if (!accessToken || !personUrn) return { ok: false, message: "No LinkedIn account connected" };
+
+  const imageUrl = resolveImageUrl(origin, post);
+  if (!imageUrl) return { ok: false, message: "Post has no image" };
+  const commentary = [post.caption, post.hashtags].filter(Boolean).join("\n\n");
+
+  try {
+    const result = await publishImagePostToLinkedIn(accessToken, personUrn, imageUrl, commentary);
+    await env.DB.prepare("UPDATE posts SET li_status = 'published', li_post_id = ?, li_published_at = ? WHERE id = ?")
+      .bind(result.id, Date.now(), post.id)
+      .run();
+    return { ok: true, message: `LinkedIn post ${result.id || "published"}` };
+  } catch (err: any) {
+    await env.DB.prepare("UPDATE posts SET li_status = 'failed' WHERE id = ?").bind(post.id).run();
+    return { ok: false, message: String(err?.message || err) };
+  }
+}
+
+/** Publishes a post to every platform it's toggled on for. Returns a combined, human-readable result. */
+export async function publishPostById(
+  env: Env,
+  origin: string,
+  postId: number
+): Promise<{ ok: boolean; message: string }> {
+  const post = await env.DB.prepare("SELECT * FROM posts WHERE id = ?").bind(postId).first<PostRow>();
+  if (!post) return { ok: false, message: "Post not found" };
+
+  const messages: string[] = [];
+  let anyOk = false;
+  let anyAttempted = false;
+
+  if (post.publish_facebook && post.status !== "published") {
+    anyAttempted = true;
+    const r = await publishToFacebook(env, origin, post);
+    await logPublish(env, post.id, "facebook", r.ok, r.message);
+    messages.push(`Facebook: ${r.message}`);
+    if (r.ok) anyOk = true;
+  }
+  if (post.publish_linkedin && post.li_status !== "published") {
+    anyAttempted = true;
+    const r = await publishToLinkedIn(env, origin, post);
+    await logPublish(env, post.id, "linkedin", r.ok, r.message);
+    messages.push(`LinkedIn: ${r.message}`);
+    if (r.ok) anyOk = true;
+  }
+
+  if (!anyAttempted) return { ok: true, message: "Already published on every enabled platform" };
+  return { ok: anyOk, message: messages.join(" · ") };
 }

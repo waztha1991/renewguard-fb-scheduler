@@ -1,26 +1,44 @@
-# RenewGuard Facebook Scheduler
+# RenewGuard Social Scheduler
 
-Connects to your Facebook Page and automatically publishes one of the 30
-pre-built RenewGuard flyers per day, using Cloudflare Workers + D1 + a daily
-Cron Trigger. Dashboard lets you connect the page, set a start date, watch
-progress, and manually publish/retry any day.
+Connects to your Facebook Page and LinkedIn profile, and automatically
+publishes scheduled flyers — using Cloudflare Workers + D1 + a daily Cron
+Trigger. The dashboard lets you manage multiple campaigns (schedules), add
+or delete flyers, upload your own images, choose which platform(s) each
+flyer goes to, watch progress, and manually publish/retry any post.
 
 Infrastructure already provisioned:
-- **D1 database** `renewguard-fb-scheduler-dev` (bound as `DB`), pre-seeded
-  with all 30 posts (caption, hashtags, CTA, image filename).
-- **Images** hosted on `renewguard-landing` at `/fb-assets/DayNN_*.png` —
-  Facebook's API needs a public URL, not a file upload, for scheduled posts.
+- **D1 database** `renewguard-fb-scheduler-dev` (bound as `DB`), with a
+  `campaigns` table (each a named, independent schedule) and a `posts`
+  table (each post can target Facebook, LinkedIn, or both).
+- Images can be **uploaded directly through the app** (stored in D1, served
+  from this Worker's own `/image/:id` route) or reference an external URL
+  (used by the original 30-day launch campaign, hosted on `renewguard-landing`).
 
-## 1. Create a Meta (Facebook) Developer App — you'll need to do this part
+## 1. Create a Meta (Facebook) Developer App
 
-1. Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps** → **Create App** → choose **"Other"** → **"Business"**.
-2. In the app, add the **Facebook Login** product (Settings → Basic is enough for now; you don't need App Review for pages you personally administer).
-3. Under **Facebook Login → Settings**, add this Valid OAuth Redirect URI (replace the domain once deployed):
+1. [developers.facebook.com](https://developers.facebook.com) → My Apps → Create App → "Other" → "Business".
+2. Add the **Facebook Login** product.
+3. Facebook Login → Settings → Valid OAuth Redirect URIs, add:
    `https://renewguard-fb-scheduler-dev.<your-subdomain>.workers.dev/auth/facebook/callback`
-4. Copy your **App ID** and **App Secret** from Settings → Basic.
-5. Make sure the Facebook account you'll use to connect is an **admin of the Page** you want to post to.
+4. Copy the **App ID** and **App Secret** from Settings → Basic.
+5. The Facebook account you connect with must be an admin of the target Page.
 
-## 2. Add secrets to this GitHub repo
+## 2. Create a LinkedIn Developer App
+
+1. [linkedin.com/developers/apps](https://www.linkedin.com/developers/apps) → Create app.
+2. Under **Products**, request **"Sign In with LinkedIn using OpenID Connect"**
+   (instant approval) — this is enough to post to your **personal profile**.
+3. Under **Auth**, add this redirect URL:
+   `https://renewguard-fb-scheduler-dev.<your-subdomain>.workers.dev/auth/linkedin/callback`
+4. Copy the **Client ID** and **Client Secret** from the Auth tab.
+
+> **Posting to a LinkedIn Company Page** instead of a personal profile needs
+> LinkedIn's separate **Community Management API** access, which requires a
+> manual partner application and approval from LinkedIn (not guaranteed,
+> can take time). This app currently posts to your personal profile, which
+> works immediately without that approval.
+
+## 3. Add secrets to this GitHub repo
 
 Settings → Secrets and variables → Actions → New repository secret:
 
@@ -30,23 +48,27 @@ Settings → Secrets and variables → Actions → New repository secret:
 | `CLOUDFLARE_ACCOUNT_ID` | same account ID used for your other RenewGuard repos |
 | `FB_APP_ID` | from step 1 |
 | `FB_APP_SECRET` | from step 1 |
-| `SCHEDULER_ADMIN_USER` | username for the scheduler's own login screen |
-| `SCHEDULER_ADMIN_PASSWORD` | password for the scheduler's own login screen |
+| `LINKEDIN_CLIENT_ID` | from step 2 |
+| `LINKEDIN_CLIENT_SECRET` | from step 2 |
+| `SCHEDULER_ADMIN_USER` | username for this app's own login screen |
+| `SCHEDULER_ADMIN_PASSWORD` | password for this app's own login screen |
 
-## 3. Deploy
+## 4. Deploy
 
-Push to `main` (or run the workflow manually from the Actions tab). This
-deploys the Worker and pushes the four app secrets into it.
+Push to `main` (or run the workflow manually from the Actions tab).
 
-## 4. Use it
+## 5. Use it
 
-1. Open the deployed Worker URL, sign in with the admin username/password you set.
-2. Click **Connect Facebook Page** → log in with Facebook → approve → pick the Page (if you manage more than one).
-3. Pick a **campaign start date** and click **Start automation**.
-4. The Cron Trigger runs daily at 09:00 UTC and publishes that day's flyer automatically. You can also click **Publish now** on any row to publish (or retry a failed) post manually.
+1. Open the deployed Worker URL, sign in with your admin username/password.
+2. **Connect Facebook Page** and/or **Connect LinkedIn**.
+3. Pick a campaign (or create a new one), a **start date**, and click **Start automation**.
+4. Add flyers via **+ Add / upload flyer** — pick which platform(s) each one targets.
+5. The Cron Trigger runs daily at 09:00 UTC and publishes that day's due flyer to every platform it's toggled on for. **Publish now** works on any row at any time.
 
-## How the schedule works
+## How scheduling works
 
-`day = (today - start_date) + 1`. Day 1 through Day 30 map 1:1 to the rows
-in the `posts` D1 table. Pausing automation (or not setting a start date)
-stops the cron handler from publishing anything.
+`day_offset = (today - campaign.start_date) + 1`. Only one campaign can run
+automation at a time — starting a new one automatically pauses any other.
+Each post tracks Facebook and LinkedIn status independently, so a flyer can
+succeed on one platform and be retried on the other without republishing
+everywhere.

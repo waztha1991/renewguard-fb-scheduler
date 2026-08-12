@@ -2,6 +2,7 @@ import type { Env, PostRow } from "./types";
 import { json, getCookie, sessionCookie, clearSessionCookie, randomToken } from "./types";
 import { dashboardHtml } from "./dashboard";
 import { exchangeCodeForUserToken, exchangeForLongLivedToken, listManagedPages } from "./facebook";
+import { exchangeLinkedInCode, getLinkedInProfile } from "./linkedin";
 import { getConfig, setConfig, currentDueDay, publishPostById, resolveImageUrl } from "./publish";
 
 async function requireSession(req: Request, env: Env): Promise<boolean> {
@@ -115,17 +116,59 @@ export default {
       return Response.redirect(`${origin}/`, 302);
     }
 
+    // ---- LinkedIn OAuth (posts to the connected personal profile) ----
+    if (path === "/auth/linkedin/start" && req.method === "GET") {
+      const redirectUri = `${origin}/auth/linkedin/callback`;
+      const authUrl =
+        `https://www.linkedin.com/oauth/v2/authorization?response_type=code` +
+        `&client_id=${env.LINKEDIN_CLIENT_ID}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&scope=${encodeURIComponent("openid profile w_member_social")}`;
+      return Response.redirect(authUrl, 302);
+    }
+
+    if (path === "/auth/linkedin/callback" && req.method === "GET") {
+      const code = url.searchParams.get("code");
+      if (!code) return new Response("Missing code", { status: 400 });
+      try {
+        const redirectUri = `${origin}/auth/linkedin/callback`;
+        const accessToken = await exchangeLinkedInCode(env, code, redirectUri);
+        const profile = await getLinkedInProfile(accessToken);
+        await setConfig(env, "li_access_token", accessToken);
+        await setConfig(env, "li_person_urn", `urn:li:person:${profile.sub}`);
+        await setConfig(env, "li_person_name", profile.name);
+        return Response.redirect(`${origin}/`, 302);
+      } catch (err: any) {
+        return new Response(`LinkedIn connection failed: ${err?.message || err}`, { status: 500 });
+      }
+    }
+
     if (path === "/api/status" && req.method === "GET") {
       const pageId = await getConfig(env, "fb_page_id");
       const pageName = await getConfig(env, "fb_page_name");
+      const liName = await getConfig(env, "li_person_name");
       const due = await currentDueDay(env);
-      return json({ connected: !!pageId, page_id: pageId, page_name: pageName, due });
+      return json({
+        connected: !!pageId,
+        page_id: pageId,
+        page_name: pageName,
+        linkedin_connected: !!liName,
+        linkedin_name: liName,
+        due,
+      });
     }
 
     if (path === "/api/disconnect" && req.method === "POST") {
       await setConfig(env, "fb_page_id", "");
       await setConfig(env, "fb_page_name", "");
       await setConfig(env, "fb_page_token", "");
+      return json({ ok: true });
+    }
+
+    if (path === "/api/disconnect/linkedin" && req.method === "POST") {
+      await setConfig(env, "li_access_token", "");
+      await setConfig(env, "li_person_urn", "");
+      await setConfig(env, "li_person_name", "");
       return json({ ok: true });
     }
 
@@ -203,6 +246,8 @@ export default {
       const hashtags = String(form.get("hashtags") || "");
       const cta = String(form.get("cta") || "");
       const file = form.get("image") as File | null;
+      const publishFacebook = form.get("publish_facebook") === "1" ? 1 : 0;
+      const publishLinkedin = form.get("publish_linkedin") === "1" ? 1 : 0;
 
       let imageSource = "external";
       let imageData: string | null = null;
@@ -220,10 +265,24 @@ export default {
       }
 
       const res = await env.DB.prepare(
-        `INSERT INTO posts (campaign_id, day_offset, pillar, focus, caption, hashtags, cta, image_source, image_url, image_data, image_mime)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO posts (campaign_id, day_offset, pillar, focus, caption, hashtags, cta, image_source, image_url, image_data, image_mime, publish_facebook, publish_linkedin)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-        .bind(campaignId, dayOffset, pillar, focus, caption, hashtags, cta, imageSource, imageUrl, imageData, imageMime)
+        .bind(
+          campaignId,
+          dayOffset,
+          pillar,
+          focus,
+          caption,
+          hashtags,
+          cta,
+          imageSource,
+          imageUrl,
+          imageData,
+          imageMime,
+          publishFacebook,
+          publishLinkedin
+        )
         .run();
       return json({ id: res.meta.last_row_id });
     }
@@ -241,11 +300,13 @@ export default {
         ["hashtags", "hashtags"],
         ["cta", "cta"],
         ["day_offset", "day_offset"],
+        ["publish_facebook", "publish_facebook"],
+        ["publish_linkedin", "publish_linkedin"],
       ] as const) {
         const v = form.get(key);
         if (v !== null) {
           fields.push(`${col} = ?`);
-          values.push(key === "day_offset" ? parseInt(String(v), 10) : String(v));
+          values.push(key === "day_offset" ? parseInt(String(v), 10) : key.startsWith("publish_") ? (v === "1" ? 1 : 0) : String(v));
         }
       }
       const file = form.get("image") as File | null;

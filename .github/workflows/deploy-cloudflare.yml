@@ -30,5 +30,7 @@ jobs:
           npx wrangler deploy
           npx wrangler secret put FB_APP_ID <<< "${{ secrets.FB_APP_ID }}"
           npx wrangler secret put FB_APP_SECRET <<< "${{ secrets.FB_APP_SECRET }}"
+          npx wrangler secret put LINKEDIN_CLIENT_ID <<< "${{ secrets.LINKEDIN_CLIENT_ID }}"
+          npx wrangler secret put LINKEDIN_CLIENT_SECRET <<< "${{ secrets.LINKEDIN_CLIENT_SECRET }}"
           npx wrangler secret put ADMIN_USER <<< "${{ secrets.SCHEDULER_ADMIN_USER }}"
           npx wrangler secret put ADMIN_PASSWORD <<< "${{ secrets.SCHEDULER_ADMIN_PASSWORD }}"
