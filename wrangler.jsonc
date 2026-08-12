@@ -1,0 +1,20 @@
+{
+  "name": "renewguard-fb-scheduler-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "renewguard-fb-scheduler-dev",
+      "database_id": "544ba6d5-55dc-4237-9580-54161036b944"
+    }
+  ],
+  "triggers": {
+    // Runs daily at 09:00 UTC (~2:30pm Sri Lanka time). Adjust to taste.
+    "crons": ["0 9 * * *"]
+  }
+}
