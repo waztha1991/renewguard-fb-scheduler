@@ -3,7 +3,7 @@ import { json, getCookie, sessionCookie, clearSessionCookie, randomToken } from 
 import { dashboardHtml } from "./dashboard";
 import { exchangeCodeForUserToken, exchangeForLongLivedToken, listManagedPages } from "./facebook";
 import { exchangeLinkedInCode, getLinkedInProfile } from "./linkedin";
-import { getConfig, setConfig, currentDueDay, publishPostById, resolveImageUrl } from "./publish";
+import { getConfig, setConfig, getCredentials, currentDueDay, publishPostById, resolveImageUrl } from "./publish";
 
 async function requireSession(req: Request, env: Env): Promise<boolean> {
   const token = getCookie(req, "session");
@@ -79,9 +79,11 @@ export default {
     }
 
     if (path === "/auth/facebook/start" && req.method === "GET") {
+      const creds = await getCredentials(env);
+      if (!creds.fbAppId) return new Response("Facebook App ID not configured — set it in Settings first.", { status: 400 });
       const redirectUri = `${origin}/auth/facebook/callback`;
       const authUrl =
-        `https://www.facebook.com/v19.0/dialog/oauth?client_id=${env.FB_APP_ID}` +
+        `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.fbAppId}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&scope=${encodeURIComponent("pages_show_list,pages_manage_posts,pages_read_engagement")}` +
         `&response_type=code`;
@@ -92,9 +94,10 @@ export default {
       const code = url.searchParams.get("code");
       if (!code) return new Response("Missing code", { status: 400 });
       try {
+        const creds = await getCredentials(env);
         const redirectUri = `${origin}/auth/facebook/callback`;
-        const shortToken = await exchangeCodeForUserToken(env, code, redirectUri);
-        const longToken = await exchangeForLongLivedToken(env, shortToken);
+        const shortToken = await exchangeCodeForUserToken(creds.fbAppId, creds.fbAppSecret, code, redirectUri);
+        const longToken = await exchangeForLongLivedToken(creds.fbAppId, creds.fbAppSecret, shortToken);
         const pages = await listManagedPages(longToken);
         if (pages.length === 1) {
           await setConfig(env, "fb_page_id", pages[0].id);
@@ -118,10 +121,12 @@ export default {
 
     // ---- LinkedIn OAuth (posts to the connected personal profile) ----
     if (path === "/auth/linkedin/start" && req.method === "GET") {
+      const creds = await getCredentials(env);
+      if (!creds.liClientId) return new Response("LinkedIn Client ID not configured — set it in Settings first.", { status: 400 });
       const redirectUri = `${origin}/auth/linkedin/callback`;
       const authUrl =
         `https://www.linkedin.com/oauth/v2/authorization?response_type=code` +
-        `&client_id=${env.LINKEDIN_CLIENT_ID}` +
+        `&client_id=${creds.liClientId}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&scope=${encodeURIComponent("openid profile w_member_social")}`;
       return Response.redirect(authUrl, 302);
@@ -131,8 +136,9 @@ export default {
       const code = url.searchParams.get("code");
       if (!code) return new Response("Missing code", { status: 400 });
       try {
+        const creds = await getCredentials(env);
         const redirectUri = `${origin}/auth/linkedin/callback`;
-        const accessToken = await exchangeLinkedInCode(env, code, redirectUri);
+        const accessToken = await exchangeLinkedInCode(creds.liClientId, creds.liClientSecret, code, redirectUri);
         const profile = await getLinkedInProfile(accessToken);
         await setConfig(env, "li_access_token", accessToken);
         await setConfig(env, "li_person_urn", `urn:li:person:${profile.sub}`);
@@ -141,6 +147,37 @@ export default {
       } catch (err: any) {
         return new Response(`LinkedIn connection failed: ${err?.message || err}`, { status: 500 });
       }
+    }
+
+    function mask(v: string): string {
+      if (!v) return "";
+      return v.length <= 4 ? "••••" : v.slice(0, 2) + "••••" + v.slice(-2);
+    }
+
+    if (path === "/api/settings" && req.method === "GET") {
+      const creds = await getCredentials(env);
+      return json({
+        fb_app_id: creds.fbAppId,
+        fb_app_secret_set: !!creds.fbAppSecret,
+        fb_app_secret_masked: mask(creds.fbAppSecret),
+        li_client_id: creds.liClientId,
+        li_client_secret_set: !!creds.liClientSecret,
+        li_client_secret_masked: mask(creds.liClientSecret),
+      });
+    }
+
+    if (path === "/api/settings" && req.method === "POST") {
+      const body = (await req.json()) as {
+        fb_app_id?: string;
+        fb_app_secret?: string;
+        li_client_id?: string;
+        li_client_secret?: string;
+      };
+      if (body.fb_app_id !== undefined) await setConfig(env, "fb_app_id", body.fb_app_id.trim());
+      if (body.fb_app_secret) await setConfig(env, "fb_app_secret", body.fb_app_secret.trim());
+      if (body.li_client_id !== undefined) await setConfig(env, "li_client_id", body.li_client_id.trim());
+      if (body.li_client_secret) await setConfig(env, "li_client_secret", body.li_client_secret.trim());
+      return json({ ok: true });
     }
 
     if (path === "/api/status" && req.method === "GET") {

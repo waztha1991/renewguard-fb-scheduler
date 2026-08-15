@@ -74,6 +74,39 @@ export function dashboardHtml(): string {
 
   <div id="app" class="hidden">
     <div class="card">
+      <div class="status-row" style="margin-bottom:10px">
+        <h3 style="margin:0;font-family:var(--font-d)">App credentials</h3>
+        <button class="secondary" id="toggleSettingsBtn">Edit</button>
+      </div>
+      <p class="hint" id="settingsSummary">Loading…</p>
+      <div id="settingsForm" class="hidden" style="margin-top:12px">
+        <div class="form-grid">
+          <div>
+            <label>Facebook App ID</label>
+            <input id="setFbAppId" placeholder="e.g. 1499327342239189" />
+          </div>
+          <div>
+            <label>Facebook App Secret <span class="hint" id="fbSecretHint"></span></label>
+            <input id="setFbAppSecret" type="password" placeholder="Leave blank to keep current" />
+          </div>
+          <div>
+            <label>LinkedIn Client ID</label>
+            <input id="setLiClientId" placeholder="LinkedIn Client ID" />
+          </div>
+          <div>
+            <label>LinkedIn Client Secret <span class="hint" id="liSecretHint"></span></label>
+            <input id="setLiClientSecret" type="password" placeholder="Leave blank to keep current" />
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:0">
+          <button class="secondary" id="cancelSettingsBtn" type="button">Cancel</button>
+          <button class="green" id="saveSettingsBtn" type="button">Save credentials</button>
+        </div>
+        <div id="settingsErr" class="err"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="status-row">
         <div>
           <strong id="connStatus">Checking connection…</strong>
@@ -188,12 +221,48 @@ async function checkSession() {
     await api('/api/status');
     loginCard.classList.add('hidden');
     app.classList.remove('hidden');
+    await loadSettings();
     await loadCampaigns();
   } catch {
     loginCard.classList.remove('hidden');
     app.classList.add('hidden');
   }
 }
+
+async function loadSettings() {
+  const s = await api('/api/settings');
+  const summary = document.getElementById('settingsSummary');
+  const parts = [];
+  parts.push(s.fb_app_id ? 'Facebook App ID set' : 'Facebook App ID missing');
+  parts.push(s.fb_app_secret_set ? 'Facebook Secret set' : 'Facebook Secret missing');
+  parts.push(s.li_client_id ? 'LinkedIn Client ID set' : 'LinkedIn Client ID missing');
+  parts.push(s.li_client_secret_set ? 'LinkedIn Secret set' : 'LinkedIn Secret missing');
+  summary.textContent = parts.join(' · ');
+  document.getElementById('setFbAppId').value = s.fb_app_id || '';
+  document.getElementById('setLiClientId').value = s.li_client_id || '';
+  document.getElementById('fbSecretHint').textContent = s.fb_app_secret_set ? '(currently: ' + s.fb_app_secret_masked + ')' : '(not set)';
+  document.getElementById('liSecretHint').textContent = s.li_client_secret_set ? '(currently: ' + s.li_client_secret_masked + ')' : '(not set)';
+}
+
+const settingsForm = document.getElementById('settingsForm');
+document.getElementById('toggleSettingsBtn').onclick = () => settingsForm.classList.toggle('hidden');
+document.getElementById('cancelSettingsBtn').onclick = () => settingsForm.classList.add('hidden');
+document.getElementById('saveSettingsBtn').onclick = async () => {
+  const err = document.getElementById('settingsErr');
+  err.textContent = '';
+  try {
+    await apiJson('/api/settings', 'POST', {
+      fb_app_id: document.getElementById('setFbAppId').value.trim(),
+      fb_app_secret: document.getElementById('setFbAppSecret').value.trim(),
+      li_client_id: document.getElementById('setLiClientId').value.trim(),
+      li_client_secret: document.getElementById('setLiClientSecret').value.trim(),
+    });
+    document.getElementById('setFbAppSecret').value = '';
+    document.getElementById('setLiClientSecret').value = '';
+    settingsForm.classList.add('hidden');
+    await loadSettings();
+  } catch (e) { err.textContent = e.message; }
+};
 
 document.getElementById('loginBtn').onclick = async () => {
   const err = document.getElementById('loginErr');

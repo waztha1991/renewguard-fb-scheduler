@@ -1,5 +1,3 @@
-import type { Env } from "./types";
-
 const GRAPH = "https://graph.facebook.com/v19.0";
 
 export interface FbPage {
@@ -9,24 +7,29 @@ export interface FbPage {
 }
 
 export async function exchangeCodeForUserToken(
-  env: Env,
+  clientId: string,
+  clientSecret: string,
   code: string,
   redirectUri: string
 ): Promise<string> {
   const url =
-    `${GRAPH}/oauth/access_token?client_id=${env.FB_APP_ID}` +
+    `${GRAPH}/oauth/access_token?client_id=${clientId}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&client_secret=${env.FB_APP_SECRET}&code=${encodeURIComponent(code)}`;
+    `&client_secret=${clientSecret}&code=${encodeURIComponent(code)}`;
   const res = await fetch(url);
   const data = (await res.json()) as { access_token?: string; error?: { message: string } };
   if (!data.access_token) throw new Error(data.error?.message || "Facebook token exchange failed");
   return data.access_token;
 }
 
-export async function exchangeForLongLivedToken(env: Env, shortToken: string): Promise<string> {
+export async function exchangeForLongLivedToken(
+  clientId: string,
+  clientSecret: string,
+  shortToken: string
+): Promise<string> {
   const url =
     `${GRAPH}/oauth/access_token?grant_type=fb_exchange_token` +
-    `&client_id=${env.FB_APP_ID}&client_secret=${env.FB_APP_SECRET}` +
+    `&client_id=${clientId}&client_secret=${clientSecret}` +
     `&fb_exchange_token=${encodeURIComponent(shortToken)}`;
   const res = await fetch(url);
   const data = (await res.json()) as { access_token?: string; error?: { message: string } };

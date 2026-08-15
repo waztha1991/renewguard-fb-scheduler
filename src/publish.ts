@@ -15,6 +15,23 @@ export async function setConfig(env: Env, key: string, value: string): Promise<v
     .run();
 }
 
+/** App-level credentials can be set either in the dashboard (stored in D1) or as GitHub/Worker
+ * secrets at deploy time. Values saved in the dashboard always take priority. */
+export async function getCredentials(env: Env) {
+  const [fbAppId, fbAppSecret, liClientId, liClientSecret] = await Promise.all([
+    getConfig(env, "fb_app_id"),
+    getConfig(env, "fb_app_secret"),
+    getConfig(env, "li_client_id"),
+    getConfig(env, "li_client_secret"),
+  ]);
+  return {
+    fbAppId: fbAppId || env.FB_APP_ID || "",
+    fbAppSecret: fbAppSecret || env.FB_APP_SECRET || "",
+    liClientId: liClientId || env.LINKEDIN_CLIENT_ID || "",
+    liClientSecret: liClientSecret || env.LINKEDIN_CLIENT_SECRET || "",
+  };
+}
+
 /** Public URL any platform's servers (and the dashboard) can fetch this post's image from. */
 export function resolveImageUrl(origin: string, post: PostRow): string {
   if (post.image_source === "uploaded") return `${origin}/image/${post.id}`;

@@ -1,8 +1,11 @@
-import type { Env } from "./types";
-
 const LI_VERSION = "202401";
 
-export async function exchangeLinkedInCode(env: Env, code: string, redirectUri: string): Promise<string> {
+export async function exchangeLinkedInCode(
+  clientId: string,
+  clientSecret: string,
+  code: string,
+  redirectUri: string
+): Promise<string> {
   const res = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -10,8 +13,8 @@ export async function exchangeLinkedInCode(env: Env, code: string, redirectUri: 
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: env.LINKEDIN_CLIENT_ID,
-      client_secret: env.LINKEDIN_CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
     }),
   });
   const data = (await res.json()) as { access_token?: string; error_description?: string };
