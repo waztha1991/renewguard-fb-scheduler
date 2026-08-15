@@ -1,4 +1,13 @@
-const LI_VERSION = "202401";
+// LinkedIn releases a new API version monthly (format YYYYMM) and supports each
+// for at least a year. Using "2 months ago" avoids both unreleased future versions
+// and (eventually) sunset old ones, without needing a manual update every year.
+function currentLinkedInVersion(): string {
+  const d = new Date();
+  d.setUTCMonth(d.getUTCMonth() - 2);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}${m}`;
+}
 
 export async function exchangeLinkedInCode(
   clientId: string,
@@ -37,7 +46,7 @@ async function registerImageUpload(accessToken: string, ownerUrn: string): Promi
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      "LinkedIn-Version": LI_VERSION,
+      "LinkedIn-Version": currentLinkedInVersion(),
       "X-Restli-Protocol-Version": "2.0.0",
     },
     body: JSON.stringify({ initializeUploadRequest: { owner: ownerUrn } }),
@@ -76,7 +85,7 @@ export async function publishImagePostToLinkedIn(
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      "LinkedIn-Version": LI_VERSION,
+      "LinkedIn-Version": currentLinkedInVersion(),
       "X-Restli-Protocol-Version": "2.0.0",
     },
     body: JSON.stringify({
