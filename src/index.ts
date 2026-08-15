@@ -1,6 +1,7 @@
 import type { Env, PostRow } from "./types";
 import { json, getCookie, sessionCookie, clearSessionCookie, randomToken } from "./types";
 import { dashboardHtml } from "./dashboard";
+import { privacyPolicyHtml } from "./privacy";
 import { exchangeCodeForUserToken, exchangeForLongLivedToken, listManagedPages } from "./facebook";
 import { exchangeLinkedInCode, getLinkedInProfile } from "./linkedin";
 import { getConfig, setConfig, getCredentials, currentDueDay, publishPostById, resolveImageUrl } from "./publish";
@@ -43,6 +44,10 @@ export default {
       // Remember our own public origin so the cron handler (which has no request) can build image URLs.
       ctx.waitUntil(setConfig(env, "worker_origin", origin));
       return new Response(dashboardHtml(), { headers: { "Content-Type": "text/html" } });
+    }
+
+    if (path === "/privacy" && req.method === "GET") {
+      return new Response(privacyPolicyHtml(), { headers: { "Content-Type": "text/html" } });
     }
 
     const imageMatch = path.match(/^\/image\/(\d+)$/);
