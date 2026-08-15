@@ -7,6 +7,7 @@ export function dashboardHtml(): string {
 <title>RenewGuard — Facebook Scheduler</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   :root {
     --ink:#17123f; --green:#12a150; --green-deep:#0b7a3e; --green-soft:#d5f5e0;
@@ -150,7 +151,10 @@ export function dashboardHtml(): string {
     <div class="card">
       <div class="status-row" style="margin-bottom:10px">
         <h3 style="margin:0;font-family:var(--font-d)">Posts</h3>
-        <button class="green" id="addPostBtn">+ Add / upload flyer</button>
+        <div>
+          <button class="secondary" id="downloadAllBtn">Download all (.zip)</button>
+          <button class="green" id="addPostBtn">+ Add / upload flyer</button>
+        </div>
       </div>
       <div class="table-scroll">
       <table>
@@ -388,10 +392,13 @@ async function renderCampaign() {
   document.getElementById('startDate').value = c.start_date || '';
 }
 
+let lastPosts = [];
+
 async function loadPosts() {
   const body = document.getElementById('postsBody');
-  if (!currentCampaignId) { body.innerHTML = ''; return; }
+  if (!currentCampaignId) { body.innerHTML = ''; lastPosts = []; return; }
   const posts = await api('/api/posts?campaign_id=' + currentCampaignId);
+  lastPosts = posts;
   body.innerHTML = posts.map(p => \`
     <tr>
       <td><strong>\${p.day_offset}</strong></td>
@@ -401,6 +408,7 @@ async function loadPosts() {
       <td>\${p.publish_linkedin ? '<span class="badge ' + p.li_status + '">' + p.li_status + '</span>' : '<span class="hint">off</span>'}</td>
       <td class="row-actions">
         <button class="secondary" data-publish="\${p.id}" \${(p.status === 'published' || !p.publish_facebook) && (p.li_status === 'published' || !p.publish_linkedin) ? 'disabled' : ''}>Publish now</button>
+        <a class="secondary" style="display:inline-flex;align-items:center;padding:10px 14px;text-decoration:none;border-radius:.7rem" href="/api/posts/\${p.id}/download" target="_blank" rel="noopener">Download</a>
         <button class="secondary" data-edit="\${p.id}">Edit</button>
         <button class="danger" data-delete="\${p.id}">Delete</button>
       </td>
@@ -447,6 +455,42 @@ function openPostModal(post) {
 document.getElementById('addPostBtn').onclick = () => {
   if (!currentCampaignId) { alert('Create or select a campaign first'); return; }
   openPostModal(null);
+};
+
+document.getElementById('downloadAllBtn').onclick = async () => {
+  if (!lastPosts.length) { alert('No flyers to download in this campaign.'); return; }
+  const btn = document.getElementById('downloadAllBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  const zip = new JSZip();
+  try {
+    for (let i = 0; i < lastPosts.length; i++) {
+      const p = lastPosts[i];
+      btn.textContent = 'Zipping ' + (i + 1) + '/' + lastPosts.length + '…';
+      const res = await fetch('/api/posts/' + p.id + '/download', { credentials: 'include' });
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="(.+?)"/);
+      const filename = match ? match[1] : ('Day' + String(p.day_offset).padStart(2, '0') + '.png');
+      zip.file(filename, blob);
+    }
+    btn.textContent = 'Preparing download…';
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'RenewGuard-Flyers.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Download failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 };
 document.getElementById('postModalCancel').onclick = () => postModalBg.classList.add('hidden');
 

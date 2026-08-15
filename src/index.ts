@@ -381,6 +381,41 @@ export default {
       return json(result, result.ok ? 200 : 500);
     }
 
+    const downloadMatch = path.match(/^\/api\/posts\/(\d+)\/download$/);
+    if (downloadMatch && req.method === "GET") {
+      const id = parseInt(downloadMatch[1], 10);
+      const post = await env.DB.prepare("SELECT * FROM posts WHERE id = ?").bind(id).first<PostRow>();
+      if (!post) return new Response("Not found", { status: 404 });
+
+      let bytes: ArrayBuffer;
+      let mime: string;
+      if (post.image_source === "uploaded" && post.image_data) {
+        const bin = atob(post.image_data);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        bytes = arr.buffer;
+        mime = post.image_mime || "image/png";
+      } else if (post.image_url) {
+        const res = await fetch(post.image_url);
+        if (!res.ok) return new Response("Could not fetch image", { status: 502 });
+        bytes = await res.arrayBuffer();
+        mime = res.headers.get("Content-Type") || "image/png";
+      } else {
+        return new Response("Post has no image", { status: 404 });
+      }
+
+      const ext = mime.includes("png") ? "png" : mime.includes("jpeg") || mime.includes("jpg") ? "jpg" : "png";
+      const safePillar = (post.pillar || "flyer").replace(/[^a-z0-9]+/gi, "-");
+      const filename = `RenewGuard-Day${String(post.day_offset).padStart(2, "0")}-${safePillar}.${ext}`;
+
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": mime,
+          "Content-Disposition": `attachment; filename="${filename}"`,
+        },
+      });
+    }
+
     return new Response("Not found", { status: 404 });
   },
 
